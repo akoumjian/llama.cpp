@@ -1164,8 +1164,16 @@ static common_chat_params common_chat_params_init_kimi_k2(const common_chat_temp
     };
 
     auto has_tools         = inputs.tools.is_array() && !inputs.tools.empty();
+    auto has_schema        = inputs.json_schema.is_object() && !inputs.json_schema.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
-    auto include_grammar   = has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
+    auto include_grammar   = has_schema || (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE);
+
+    if (has_tools && has_schema) {
+        throw std::runtime_error("Kimi K2: cannot combine \"tools\" with \"json_schema\"/response_format; remove tools or remove response_format");
+    }
+    if (has_schema && !inputs.grammar.empty()) {
+        throw std::runtime_error("Either \"json_schema\" or \"grammar\" can be specified, but not both");
+    }
 
     const std::string SECTION_BEGIN = "<|tool_calls_section_begin|>";
     const std::string SECTION_END   = "<|tool_calls_section_end|>";
@@ -1203,6 +1211,9 @@ static common_chat_params common_chat_params_init_kimi_k2(const common_chat_temp
 
         // Content only parser (no tools)
         if (!has_tools || inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (has_schema) {
+                return generation_prompt + reasoning + p.content(p.schema(p.json(), "response-format", inputs.json_schema)) + end;
+            }
             return generation_prompt + reasoning + p.content(p.rest()) + end;
         }
 
@@ -1245,7 +1256,7 @@ static common_chat_params common_chat_params_init_kimi_k2(const common_chat_temp
     data.parser = parser.save();
 
     if (include_grammar) {
-        data.grammar_lazy = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
+        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
         data.grammar      = build_grammar([&](const common_grammar_builder & builder) {
             foreach_function(inputs.tools, [&](const json & tool) {
                 const auto & function = tool.at("function");
@@ -1794,4 +1805,3 @@ std::map<std::string, bool> common_chat_templates_get_caps(const common_chat_tem
     GGML_ASSERT(chat_templates->template_default != nullptr);
     return chat_templates->template_default->caps.to_map();
 }
-
